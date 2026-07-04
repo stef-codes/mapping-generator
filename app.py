@@ -17,8 +17,7 @@ for _module_name in list(sys.modules):
     if _module_name == "src" or _module_name.startswith("src."):
         del sys.modules[_module_name]
 
-from src.column_mapping import guess_mapping_columns
-from src.config import CATEGORIES, DEFAULT_ROW_LIMIT, MAX_ROW_LIMIT
+from src.config import AI_BATCH_SIZE, CATEGORIES, DEFAULT_ROW_LIMIT, GEMINI_MODEL, MAX_ROW_LIMIT, PREVIEW_ROW_LIMIT
 from src.ai_fallback import is_ai_available
 from src.database import (
     get_connection_string,
@@ -33,7 +32,8 @@ from src.export import (
     generate_transform_script,
     generate_transformed_data_csv,
 )
-from src.ingestion import build_mapping_rows, load_mapping_document, load_source_csv
+from src.codegen import apply_transform, transform_column_warnings
+from src.ingestion import build_mapping_rows_auto, load_mapping_document, load_source_csv
 from src.matching import generate_suggestions
 from src.profiling import profile_source_columns
 
@@ -57,6 +57,7 @@ def _init_state() -> None:
         "source_df": None,
         "source_filename": "",
         "source_profile": None,
+        "source_profile_key": "",
         "suggestions": None,
         "reviewed_ready": False,
     }
@@ -67,18 +68,40 @@ def _init_state() -> None:
 
 _init_state()
 
+
+def _source_fingerprint(df: pd.DataFrame, filename: str = "") -> str:
+    return f"{filename}:{len(df)}:{len(df.columns)}"
+
+
+def _ensure_source_profile() -> None:
+    df = st.session_state.source_df
+    if df is None:
+        return
+    key = _source_fingerprint(df, st.session_state.source_filename)
+    if (
+        st.session_state.get("source_profile_key") != key
+        or st.session_state.source_profile is None
+    ):
+        st.session_state.source_profile = profile_source_columns(df)
+        st.session_state.source_profile_key = key
+
+
 with st.sidebar:
     st.header("Settings")
-    gemini_configured = is_ai_available()
-    if gemini_configured:
+    if is_ai_available():
         st.success("Gemini API key configured")
+        st.caption(f"Model: `{GEMINI_MODEL}`")
+        st.caption(f"Batch size: {AI_BATCH_SIZE}")
     else:
-        st.warning("Add `GEMINI_API_KEY` to `.env` to enable AI suggestions.")
-    use_gemini = st.checkbox(
-        "Use Gemini for missing fields",
-        value=gemini_configured,
-        disabled=not gemini_configured,
-        help="After rule-based matching, send unresolved rows to Gemini in batches.",
+        st.error("Add `GEMINI_API_KEY` to `.env` to run this app.")
+        st.caption(f"Model (from `.env`): `{GEMINI_MODEL}`")
+    st.divider()
+    st.caption(
+        f"CSV uploads: no row cap. DB loads capped at **{MAX_ROW_LIMIT:,}** rows. "
+        f"Previews show up to **{PREVIEW_ROW_LIMIT:,}** rows; exports include all loaded rows."
+    )
+    st.caption(
+        "Gemini speed depends on **mapping target field count**, not source row count."
     )
 
 
@@ -106,20 +129,11 @@ if mapping_file:
     st.success(f"Loaded **{len(raw_df):,}** rows from `{mapping_file.name}`")
 
     try:
-        column_mapping = guess_mapping_columns(raw_df)
-        mapping_rows = build_mapping_rows(
-            raw_df,
-            column_mapping.target_col,
-            column_mapping.required_col,
-            column_mapping.dtype_col,
-            column_mapping.notes_col,
-        )
-        if mapping_rows.empty:
-            raise ValueError(
-                f"No target fields found in column `{column_mapping.target_col}`."
-            )
+        mapping_rows, column_mapping = build_mapping_rows_auto(raw_df)
         st.session_state.mapping_rows = mapping_rows
         st.caption(f"Detected columns: {column_mapping.summary()}")
+        with st.expander("Target fields from mapping document", expanded=True):
+            st.code(", ".join(mapping_rows["target_field"].tolist()), language=None)
         st.info(f"**{len(mapping_rows):,}** target fields identified.")
     except ValueError as exc:
         st.session_state.mapping_rows = None
@@ -216,7 +230,12 @@ with source_tab_db:
 # --- Step 3: Source profile ---
 if st.session_state.source_df is not None:
     st.header("3. Source column profile")
-    st.session_state.source_profile = profile_source_columns(st.session_state.source_df)
+    _ensure_source_profile()
+    row_count = len(st.session_state.source_df)
+    if row_count > 10_000:
+        st.caption(
+            f"Profile stats sampled from 10,000 of **{row_count:,}** loaded rows."
+        )
     st.dataframe(st.session_state.source_profile, use_container_width=True, height=300)
 
 
@@ -225,33 +244,40 @@ if (
     st.session_state.mapping_rows is not None
     and st.session_state.source_df is not None
 ):
-    st.header("4. Generate mapping suggestions")
+    st.header("4. Generate source → target mapping")
+    st.caption(
+        "Uses Gemini to guess which source column maps to each target field in your mapping document."
+    )
 
-    if st.button("Generate suggestions", type="primary", key="generate"):
+    if not is_ai_available():
+        st.warning("Configure `GEMINI_API_KEY` in `.env` before generating suggestions.")
+
+    if st.button(
+        "Generate suggestions",
+        type="primary",
+        key="generate",
+        disabled=not is_ai_available(),
+    ):
         source_cols = list(st.session_state.source_df.columns)
         total_rows = len(st.session_state.mapping_rows)
-        with st.status(
-            "Generating mapping suggestions"
-            + (" (rules + Gemini)…" if use_gemini and gemini_configured else "…"),
-            expanded=True,
-        ) as status:
-            progress = st.progress(0, text=f"Matching fields… 0/{total_rows:,}")
+        with st.status("Calling Gemini to map fields…", expanded=True) as status:
+            progress = st.progress(0, text=f"Gemini mapping… 0/{total_rows:,}")
 
             def on_progress(pct: float) -> None:
                 matched = min(int(pct * total_rows), total_rows)
-                label = "Matching fields"
-                if pct >= 0.9 and use_gemini and gemini_configured:
-                    label = "Calling Gemini for unresolved fields"
-                progress.progress(pct, text=f"{label}… {matched:,}/{total_rows:,}")
+                progress.progress(pct, text=f"Gemini mapping… {matched:,}/{total_rows:,}")
 
             try:
                 st.session_state.suggestions = generate_suggestions(
                     st.session_state.mapping_rows,
                     source_cols,
                     progress_callback=on_progress,
-                    use_ai=use_gemini and gemini_configured,
                 )
                 st.session_state.reviewed_ready = False
+                errors = st.session_state.suggestions.attrs.get("gemini_errors", [])
+                if errors:
+                    st.warning("Some Gemini batches had errors (local name matching used as backup): "
+                                 + errors[0])
                 progress.progress(1.0, text=f"Done — {total_rows:,} fields matched.")
                 status.update(
                     label=f"Generated suggestions for {total_rows:,} fields",
@@ -264,28 +290,15 @@ if (
     if st.session_state.suggestions is not None:
         sugg = st.session_state.suggestions
         counts = sugg["category"].value_counts()
-        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1, m2, m3 = st.columns(3)
         m1.metric("Direct", counts.get("direct", 0))
-        m2.metric("Derived", counts.get("derived", 0))
-        m3.metric("Hardcode", counts.get("hardcode", 0))
-        m4.metric("Conditional", counts.get("conditional", 0))
-        m5.metric("Lookup", counts.get("lookup", 0))
-        m6.metric("Missing", counts.get("missing", 0))
-
-        gemini_count = int(
-            sugg["match_reason"]
-            .astype(str)
-            .str.contains("Gemini", case=False, na=False)
-            .sum()
-        )
-        if gemini_count:
-            st.caption(f"**{gemini_count:,}** rows include Gemini-assisted suggestions.")
-
-        # --- Step 5: Review & edit ---
-        st.header("5. Review and edit")
-        st.caption("Edit any row inline before approving for export.")
+        m2.metric("Hardcode", counts.get("hardcode", 0))
+        m3.metric("Missing", counts.get("missing", 0))
 
         source_col_options = [""] + list(st.session_state.source_df.columns)
+
+        # --- Review & edit ---
+        st.header("5. Review and edit mappings")
 
         edited = st.data_editor(
             sugg,
@@ -316,13 +329,52 @@ if (
         )
         st.session_state.suggestions = edited
 
+        transformed = apply_transform(
+            st.session_state.source_df,
+            st.session_state.mapping_rows,
+            edited,
+        )
+        for warning in transform_column_warnings(
+            transformed,
+            st.session_state.mapping_rows,
+            st.session_state.source_df,
+        ):
+            st.error(warning)
+        st.caption(f"Output columns: `{', '.join(transformed.columns.tolist())}`")
+        populated = int(transformed.notna().any(axis=0).sum())
+        total_rows = len(transformed)
+        preview_rows = min(total_rows, PREVIEW_ROW_LIMIT)
+        st.header("6. Transformed data preview")
+        st.caption(
+            f"**{total_rows:,}** rows × **{len(transformed.columns):,}** mapping-doc target columns "
+            f"({populated:,} populated). Showing first **{preview_rows:,}** rows; "
+            f"download includes all **{total_rows:,}**."
+        )
+        st.dataframe(
+            transformed.head(PREVIEW_ROW_LIMIT),
+            use_container_width=True,
+            height=min(400, 35 * min(preview_rows, 25) + 38),
+        )
+        st.download_button(
+            "Download transformed data CSV",
+            data=generate_transformed_data_csv(
+                st.session_state.source_df,
+                st.session_state.mapping_rows,
+                edited,
+            ),
+            file_name="transformed_data.csv",
+            mime="text/csv",
+            type="primary",
+            key="download_transformed_preview",
+        )
+
         validation = build_validation_report(edited)
         if not validation.empty:
             st.subheader("Validation flags")
             st.dataframe(validation, use_container_width=True)
 
-        # --- Step 6: Export ---
-        st.header("6. Export")
+        # --- Step 7: Export ---
+        st.header("7. Export")
         st.session_state.reviewed_ready = st.checkbox(
             "Reviewed and ready for export",
             value=st.session_state.reviewed_ready,
@@ -345,32 +397,22 @@ if (
             ]
             mapping_export = edited[[c for c in export_cols if c in edited.columns]]
 
-            d1, d2, d3, d4 = st.columns(4)
+            d1, d2, d3 = st.columns(3)
             with d1:
-                st.download_button(
-                    "Download transformed data CSV",
-                    data=generate_transformed_data_csv(
-                        st.session_state.source_df, edited
-                    ),
-                    file_name="transformed_data.csv",
-                    mime="text/csv",
-                    type="primary",
-                )
-            with d2:
                 st.download_button(
                     "Download mapping CSV",
                     data=dataframe_to_csv_bytes(mapping_export),
                     file_name="mapping_draft.csv",
                     mime="text/csv",
                 )
-            with d3:
+            with d2:
                 st.download_button(
                     "Download validation report",
                     data=dataframe_to_csv_bytes(validation),
                     file_name="validation_report.csv",
                     mime="text/csv",
                 )
-            with d4:
+            with d3:
                 st.download_button(
                     "Download transform.py",
                     data=generate_transform_script(edited).encode("utf-8"),

@@ -264,10 +264,126 @@ def apply_field_transform(source_df: pd.DataFrame, row) -> pd.Series:
     return _empty_series(source_df)
 
 
-def apply_transform(source_df: pd.DataFrame, suggestions: pd.DataFrame) -> pd.DataFrame:
-    """Apply reviewed mapping rows to source data, producing target-schema columns."""
-    result = pd.DataFrame(index=source_df.index)
+def build_mapped_output(
+    source_df: pd.DataFrame,
+    mapping_rows: pd.DataFrame,
+    suggestions: pd.DataFrame,
+) -> pd.DataFrame:
+    """Build output with mapping-doc target columns filled from source data."""
+    suggestion_by_target: dict[str, pd.Series] = {}
     for _, row in suggestions.iterrows():
-        target = row["target_field"]
-        result[target] = apply_field_transform(source_df, row)
-    return result
+        target = str(row.get("target_field", "")).strip()
+        if target and target not in suggestion_by_target:
+            suggestion_by_target[target] = row
+
+    output: dict[str, pd.Series] = {}
+    column_order: list[str] = []
+
+    for _, mapping_row in mapping_rows.iterrows():
+        target = str(mapping_row.get("target_field", "")).strip()
+        if not target or target in output:
+            continue
+
+        column_order.append(target)
+        suggestion = suggestion_by_target.get(target)
+        output[target] = _values_for_target(source_df, target, suggestion)
+
+    return pd.DataFrame(output, index=source_df.index)[column_order]
+
+
+def _values_for_target(
+    source_df: pd.DataFrame,
+    target: str,
+    suggestion: pd.Series | None,
+) -> pd.Series:
+    if suggestion is None:
+        if target in source_df.columns:
+            return source_df[target]
+        return _empty_series(source_df)
+
+    category = str(suggestion.get("category", "")).strip()
+    source_column = str(suggestion.get("source_column", "")).strip()
+    hardcode_value = str(suggestion.get("hardcode_value", "")).strip()
+
+    if category in ("derived", "conditional"):
+        return apply_field_transform(source_df, suggestion)
+
+    if category == "hardcode" and hardcode_value:
+        return pd.Series(hardcode_value, index=source_df.index, dtype="object")
+
+    if category == "direct" and source_column and source_column in source_df.columns:
+        return source_df[source_column]
+
+    if source_column and source_column in source_df.columns:
+        return source_df[source_column]
+
+    if target in source_df.columns:
+        return source_df[target]
+
+    return apply_field_transform(source_df, suggestion)
+
+
+def apply_transform(
+    source_df: pd.DataFrame,
+    mapping_rows: pd.DataFrame,
+    suggestions: pd.DataFrame,
+) -> pd.DataFrame:
+    """Map source data into mapping-document target fields (not source column names)."""
+    return build_mapped_output(source_df, mapping_rows, suggestions)
+
+
+def expected_output_columns(mapping_rows: pd.DataFrame) -> list[str]:
+    columns: list[str] = []
+    seen: set[str] = set()
+    for _, row in mapping_rows.iterrows():
+        target = str(row.get("target_field", "")).strip()
+        if target and target not in seen:
+            seen.add(target)
+            columns.append(target)
+    return columns
+
+
+def transform_column_warnings(
+    result: pd.DataFrame,
+    mapping_rows: pd.DataFrame,
+    source_df: pd.DataFrame,
+) -> list[str]:
+    """Return user-facing warnings when output columns look like source schema."""
+    warnings: list[str] = []
+    expected = expected_output_columns(mapping_rows)
+    actual = list(result.columns)
+
+    if expected and actual != expected:
+        warnings.append(
+            "Output columns do not match the mapping document field list. "
+            f"Expected {len(expected)} mapping targets, got {len(actual)} columns."
+        )
+
+    if not expected:
+        return warnings
+
+    expected_set = set(expected)
+    source_set = set(source_df.columns)
+    overlap = expected_set & source_set
+    extra_source_cols = [col for col in actual if col in source_set and col not in expected_set]
+
+    if extra_source_cols:
+        preview = ", ".join(extra_source_cols[:8])
+        suffix = "…" if len(extra_source_cols) > 8 else ""
+        warnings.append(
+            "Output includes source report columns that are not mapping targets: "
+            f"{preview}{suffix}. Re-upload the mapping document and confirm step 1 target fields."
+        )
+
+    if (
+        len(expected) <= 30
+        and len(actual) >= len(source_df.columns) * 0.8
+        and len(overlap) >= len(expected) * 0.8
+        and len(actual) > len(expected) + 3
+    ):
+        warnings.append(
+            "Output looks like the full source schema instead of your mapping targets. "
+            "Check step 1 — target fields should be names like item_id, not every source column."
+        )
+
+    return warnings

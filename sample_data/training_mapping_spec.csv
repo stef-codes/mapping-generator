@@ -1,0 +1,14 @@
+Target Field,Required,Data Type,Transformation Notes
+item_id,Yes,string,Map from legacy_system_id
+item_title,Yes,string,
+item_type,Yes,string,
+start_datetime,Yes,datetime,Map from lease_start_date
+end_datetime,Yes,datetime,Map from lease_end_date
+facility_id,Yes,string,
+facility_name,Yes,string,
+training_contact_id,No,string,Map from vendor_id
+instructor_user_id,No,string,Map from manager_name
+max_enrollments,Yes,int,Map from unit_count
+status,Yes,string,Map from is_active
+external_key,Yes,string,Map from external_ref_id
+migration_notes,No,string,Map from notes

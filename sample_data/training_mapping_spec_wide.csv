@@ -1,0 +1,4 @@
+RowType,item_id,item_title,item_type,start_datetime,end_datetime,facility_id,facility_name,training_contact_id,instructor_user_id,max_enrollments,status,external_key,migration_notes
+Required,Yes,Yes,Yes,Yes,Yes,Yes,Yes,No,No,Yes,Yes,Yes,No
+Data Type,string,string,string,datetime,datetime,string,string,string,string,int,string,string,string
+Transformation Notes,Map from legacy_system_id,,,Map from lease_start_date,Map from lease_end_date,,,Map from vendor_id,Map from manager_name,Map from unit_count,Map from is_active,Map from external_ref_id,Map from notes

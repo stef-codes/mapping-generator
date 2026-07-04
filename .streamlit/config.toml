@@ -1,0 +1,9 @@
+[theme]
+base = "light"
+
+[server]
+headless = true
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false

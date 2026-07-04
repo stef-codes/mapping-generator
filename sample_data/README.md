@@ -4,25 +4,29 @@ Generated files live in `sample_data/`:
 
 | File | Description |
 |---|---|
-| `mapping_spec.csv` / `.xlsx` | 200-row mapping doc with direct, hardcode, lookup, and missing fields |
-| `source_report.csv` | 500-row source with 78 columns (70+ target-relevant + extras) |
+| `mapping_spec.csv` / `.xlsx` | 200-row facility mapping doc (large-scale test) |
+| `source_report.csv` | 500-row facility source with 78 columns |
+| `training_mapping_spec.csv` | **13-row training migration target schema** (vertical layout) |
+| `training_mapping_spec_wide.csv` | Same 13 fields in **wide layout** (`RowType` label column + field names as headers) |
+| `training_source_report.csv` | 500-row source with columns for training mapping |
 
-## Regenerate
+## Training schema (quick demo)
+
+Target fields in `training_mapping_spec.csv`:
+
+`item_id`, `item_title`, `item_type`, `start_datetime`, `end_datetime`, `facility_id`, `facility_name`, `training_contact_id`, `instructor_user_id`, `max_enrollments`, `status`, `external_key`, `migration_notes`
+
+**Quick test:**
+
+1. Upload `sample_data/training_mapping_spec.csv`
+2. Upload `sample_data/training_source_report.csv`
+3. Click **Generate suggestions**
+4. Transformed preview should show **13 columns** (mapping doc targets), not source column names
+
+## Regenerate facility sample data
 
 ```powershell
 cd C:\Users\Davis\code\work\mapping-generator
 .venv\Scripts\Activate.ps1
 python scripts/generate_sample_data.py
 ```
-
-## Quick test in the app
-
-1. Upload `sample_data/mapping_spec.xlsx`
-2. Map columns: **Target Field** → target, **Required** → required, **Data Type** → dtype, **Transformation Notes** → notes
-3. Upload `sample_data/source_report.csv` as the source
-4. Generate suggestions and review the mix of categories
-
-Expected highlights:
-- `facility_id` → direct match to `facility_id`
-- `square_footage` → **missing** (source column is `sqft`)
-- Hardcode/lookup rows detected from notes text

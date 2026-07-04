@@ -86,10 +86,12 @@ def generate_transform_script(suggestions: pd.DataFrame) -> str:
 
 
 def generate_transformed_data_csv(
-    source_df: pd.DataFrame, suggestions: pd.DataFrame
+    source_df: pd.DataFrame,
+    mapping_rows: pd.DataFrame,
+    suggestions: pd.DataFrame,
 ) -> bytes:
-    """Export source rows mapped into target-field columns."""
-    transformed = apply_transform(source_df, suggestions)
+    """Export source rows mapped into mapping-document target field columns."""
+    transformed = apply_transform(source_df, mapping_rows, suggestions)
     return dataframe_to_csv_bytes(transformed)
 
 

@@ -89,7 +89,10 @@ def test_apply_transform_matches_generated_script():
     )
 
     source_df = _sample_source_df()
-    result = apply_transform(source_df, suggestions)
+    mapping_rows = pd.DataFrame(
+        [{"target_field": "composite_key"}, {"target_field": "active_flag"}, {"target_field": "country"}]
+    )
+    result = apply_transform(source_df, mapping_rows, suggestions)
     assert list(result["composite_key"]) == ["DTA1", "DTB2"]
     assert list(result["active_flag"]) == ["Y", "N"]
     assert list(result["country"]) == ["US", "US"]
@@ -108,7 +111,10 @@ def test_generate_transformed_data_csv():
             }
         ]
     )
-    csv_bytes = generate_transformed_data_csv(_sample_source_df(), suggestions)
+    mapping_rows = pd.DataFrame([{"target_field": "facility_id"}])
+    csv_bytes = generate_transformed_data_csv(
+        _sample_source_df(), mapping_rows, suggestions
+    )
     text = csv_bytes.decode("utf-8")
     assert "facility_id" in text.splitlines()[0]
     assert "A1" in text

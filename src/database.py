@@ -19,7 +19,7 @@ ENV_KEYS = {
 
 
 def load_env() -> None:
-    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
 
 
 def get_connection_string(environment: str) -> str:
