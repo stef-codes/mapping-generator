@@ -12,7 +12,12 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.config import AI_BATCH_SIZE, CATEGORIES, DEFAULT_ROW_LIMIT, GEMINI_MODEL, MAX_ROW_LIMIT, PREVIEW_ROW_LIMIT
+from src import config
+from src.config import (
+    CATEGORIES,
+    DEFAULT_ROW_LIMIT,
+    MAX_ROW_LIMIT,
+)
 from src.ai_fallback import is_ai_available
 from src.database import (
     is_database_available,
@@ -83,17 +88,18 @@ def _ensure_source_profile() -> None:
 
 with st.sidebar:
     st.header("Settings")
+    config.refresh_runtime_config()
     if is_ai_available():
         st.success("Gemini API key configured")
-        st.caption(f"Model: `{GEMINI_MODEL}`")
-        st.caption(f"Batch size: {AI_BATCH_SIZE}")
+        st.caption(f"Model: `{config.GEMINI_MODEL}`")
+        st.caption(f"Batch size: {config.AI_BATCH_SIZE}")
     else:
         st.error("Add `GEMINI_API_KEY` to `.env` to run this app.")
-        st.caption(f"Model (from `.env`): `{GEMINI_MODEL}`")
+        st.caption(f"Model (from `.env`): `{config.GEMINI_MODEL}`")
     st.divider()
     st.caption(
         f"CSV uploads: no row cap. DB loads capped at **{MAX_ROW_LIMIT:,}** rows. "
-        f"Previews show up to **{PREVIEW_ROW_LIMIT:,}** rows; exports include all loaded rows."
+        f"Previews show up to **{config.PREVIEW_ROW_LIMIT:,}** rows; exports include all loaded rows."
     )
     st.caption(
         "Gemini speed depends on **mapping target field count**, not source row count."
@@ -345,7 +351,7 @@ if (
         st.caption(f"Output columns: `{', '.join(transformed.columns.tolist())}`")
         populated = int(transformed.notna().any(axis=0).sum())
         total_rows = len(transformed)
-        preview_rows = min(total_rows, PREVIEW_ROW_LIMIT)
+        preview_rows = min(total_rows, config.PREVIEW_ROW_LIMIT)
         st.header("6. Transformed data preview")
         st.caption(
             f"**{total_rows:,}** rows × **{len(transformed.columns):,}** mapping-doc target columns "
@@ -353,7 +359,7 @@ if (
             f"download includes all **{total_rows:,}**."
         )
         st.dataframe(
-            transformed.head(PREVIEW_ROW_LIMIT),
+            transformed.head(config.PREVIEW_ROW_LIMIT),
             width="stretch",
             height=min(400, 35 * min(preview_rows, 25) + 38),
         )

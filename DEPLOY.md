@@ -59,7 +59,7 @@ Easiest path for a **CSV-only pilot** with colleagues.
 
 **Limits:** Free tier has resource caps; large CSVs (10k+ rows) may feel slow in the browser preview (export still works). No persistent storage between sessions.
 
-**Important:** `pyodbc` is **not** in `requirements.txt` because importing it on Streamlit Cloud often causes a **segmentation fault**. Use CSV upload in the cloud; install `pyodbc` only on Windows for the Live database tab.
+**Important:** Keep `requirements.txt` free of `pyodbc` and Gemini SDKs (`google-generativeai` / `google-genai`). Those native packages often cause **segmentation faults** on Streamlit Cloud. This app calls Gemini over HTTPS REST instead. Use CSV upload in the cloud; install `pyodbc` only on Windows for the Live database tab.
 
 ---
 

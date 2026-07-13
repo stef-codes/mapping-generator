@@ -9,7 +9,7 @@ from typing import Callable
 
 import pandas as pd
 
-from src.config import AI_BATCH_SIZE, GEMINI_API_KEY, GEMINI_MODEL
+from src import config
 from src.similarity import resolve_column_reference
 
 _PROMPT = """You are a data-mapping assistant. Map each TARGET FIELD to the best SOURCE COLUMN.
@@ -62,7 +62,8 @@ class AiSuggestion:
 
 
 def is_ai_available() -> bool:
-    return bool(GEMINI_API_KEY)
+    config.refresh_runtime_config()
+    return bool(config.GEMINI_API_KEY)
 
 
 def _pick_source_column(raw: dict, source_columns: list[str]) -> str:
@@ -282,37 +283,76 @@ def _extract_mappings(text: str) -> list[dict]:
 
 
 def _call_gemini(prompt: str) -> str:
-    from google import genai
-    from google.genai import types
+    """Call Gemini via HTTPS REST — avoids native gRPC SDKs that segfault on Streamlit Cloud."""
+    import urllib.error
+    import urllib.request
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    models_to_try = [GEMINI_MODEL, "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
+    config.refresh_runtime_config()
+    api_key = config.GEMINI_API_KEY
+    if not api_key:
+        raise GeminiMappingError("GEMINI_API_KEY is not configured.")
+
+    models_to_try = [
+        config.GEMINI_MODEL,
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-pro",
+    ]
     seen: set[str] = set()
     errors: list[str] = []
-    config = types.GenerateContentConfig(
-        temperature=0.1,
-        response_mime_type="application/json",
-    )
+    payload = json.dumps(
+        {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.1,
+                "responseMimeType": "application/json",
+            },
+        }
+    ).encode("utf-8")
 
     for model_name in models_to_try:
         if not model_name or model_name in seen:
             continue
         seen.add(model_name)
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model_name}:generateContent"
+        )
+        request = urllib.request.Request(
+            url,
+            data=payload,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key,
+            },
+        )
         try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=config,
-            )
-            text = response.text or ""
+            with urllib.request.urlopen(request, timeout=120) as response:
+                body = json.loads(response.read().decode("utf-8"))
+            text = _text_from_gemini_response(body)
             if text.strip():
                 return text
+            errors.append(f"{model_name}: empty response")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:300]
+            errors.append(f"{model_name}: HTTP {exc.code} {detail}")
         except Exception as exc:
             errors.append(f"{model_name}: {exc}")
 
     raise GeminiMappingError(
         "Gemini API failed for all models. " + " | ".join(errors[:3])
     )
+
+
+def _text_from_gemini_response(body: dict) -> str:
+    candidates = body.get("candidates") or []
+    if not candidates:
+        feedback = body.get("promptFeedback") or body.get("error") or body
+        raise GeminiMappingError(f"No candidates in Gemini response: {feedback}")
+    parts = (((candidates[0] or {}).get("content") or {}).get("parts")) or []
+    chunks = [str(part.get("text", "")) for part in parts if isinstance(part, dict)]
+    return "".join(chunks)
 
 
 def suggest_mappings_batch(
@@ -386,9 +426,13 @@ def generate_gemini_suggestions(
     mapping_rows: pd.DataFrame,
     source_columns: list[str],
     progress_callback: Callable[[float], None] | None = None,
-    batch_size: int = AI_BATCH_SIZE,
+    batch_size: int | None = None,
 ) -> pd.DataFrame:
     """Map all target fields via Gemini (sole mapping step)."""
+    config.refresh_runtime_config()
+    if batch_size is None:
+        batch_size = config.AI_BATCH_SIZE
+
     if not is_ai_available():
         raise ValueError(
             "GEMINI_API_KEY is required. Add it to .env (see .env.example)."
