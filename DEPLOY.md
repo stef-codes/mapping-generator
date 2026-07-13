@@ -35,20 +35,31 @@ Easiest path for a **CSV-only pilot** with colleagues.
 
 1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
 2. **New app** → select repo `stef-codes/mapping-generator`, branch `main`, main file **`app.py`**.
-3. Open **Advanced settings → Secrets** and paste:
+3. Open **Advanced settings → Secrets** and paste **valid TOML** (see `.streamlit/secrets.toml.example`):
 
    ```toml
-   GEMINI_API_KEY = "your-key-here"
+   GEMINI_API_KEY = "paste-your-gemini-api-key-here"
    GEMINI_MODEL = "gemini-2.5-flash"
    AI_BATCH_SIZE = "15"
    PREVIEW_ROW_LIMIT = "500"
    ```
 
-   Streamlit injects these as environment variables.
+   **Not valid** (this is `.env` syntax — Streamlit will reject it):
+
+   ```
+   GEMINI_API_KEY=AIzaSy...
+   GEMINI_MODEL=gemini-2.5-flash
+   ```
+
+   Rules: use `KEY = "value"` (spaces around `=`, double quotes on strings). No `# Copy to .env` header lines unless commented with `#`.
+
+   Streamlit reads these via `st.secrets` (the app merges them into config automatically).
 
 4. Deploy. The app URL will look like `https://your-app.streamlit.app`.
 
 **Limits:** Free tier has resource caps; large CSVs (10k+ rows) may feel slow in the browser preview (export still works). No persistent storage between sessions.
+
+**Important:** `pyodbc` is **not** in `requirements.txt` because importing it on Streamlit Cloud often causes a **segmentation fault**. Use CSV upload in the cloud; install `pyodbc` only on Windows for the Live database tab.
 
 ---
 

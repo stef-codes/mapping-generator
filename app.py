@@ -20,7 +20,7 @@ for _module_name in list(sys.modules):
 from src.config import AI_BATCH_SIZE, CATEGORIES, DEFAULT_ROW_LIMIT, GEMINI_MODEL, MAX_ROW_LIMIT, PREVIEW_ROW_LIMIT
 from src.ai_fallback import is_ai_available
 from src.database import (
-    get_connection_string,
+    is_database_available,
     list_tables,
     load_table,
     run_custom_query,
@@ -161,70 +161,77 @@ with source_tab_csv:
         )
 
 with source_tab_db:
-    env = st.selectbox("Environment", ["DEV", "QA"], key="db_env")
-    if st.button("Test connection", key="test_conn"):
-        ok, msg = test_connection(env)
-        st.success(msg) if ok else st.error(msg)
-
-    db_mode = st.radio(
-        "Load mode",
-        ["Browse tables", "Custom SQL"],
-        horizontal=True,
-        key="db_mode",
-    )
-    row_limit = st.number_input(
-        "Row limit",
-        min_value=1,
-        max_value=MAX_ROW_LIMIT,
-        value=DEFAULT_ROW_LIMIT,
-        key="db_row_limit",
-    )
-
-    if db_mode == "Browse tables":
-        if st.button("List tables", key="list_tables"):
-            try:
-                st.session_state.db_tables = list_tables(env)
-            except Exception as exc:
-                st.error(str(exc))
-
-        tables = st.session_state.get("db_tables", [])
-        if tables:
-            selected = st.selectbox("Select table", tables, key="db_table")
-            if st.button("Load table", key="load_table"):
-                try:
-                    st.session_state.source_df = load_table(env, selected, row_limit)
-                    st.session_state.suggestions = None
-                    st.session_state.reviewed_ready = False
-                    st.success(
-                        f"Loaded **{len(st.session_state.source_df):,}** rows from `{selected}`."
-                    )
-                except Exception as exc:
-                    st.error(str(exc))
+    if not is_database_available():
+        st.info(
+            "Live database is unavailable in this environment (no `pyodbc` / ODBC driver). "
+            "Use **CSV upload** on Streamlit Cloud. On Windows, install with "
+            '`pip install "pyodbc>=5.0.0"`.'
+        )
     else:
-        custom_sql = st.text_area(
-            "Custom SQL",
-            height=120,
-            placeholder="SELECT * FROM dbo.MyReport WHERE ...",
-            key="custom_sql",
+        env = st.selectbox("Environment", ["DEV", "QA"], key="db_env")
+        if st.button("Test connection", key="test_conn"):
+            ok, msg = test_connection(env)
+            st.success(msg) if ok else st.error(msg)
+
+        db_mode = st.radio(
+            "Load mode",
+            ["Browse tables", "Custom SQL"],
+            horizontal=True,
+            key="db_mode",
         )
-        st.caption(
-            f"A `TOP {row_limit}` safeguard is auto-injected if no row limit is present."
+        row_limit = st.number_input(
+            "Row limit",
+            min_value=1,
+            max_value=MAX_ROW_LIMIT,
+            value=DEFAULT_ROW_LIMIT,
+            key="db_row_limit",
         )
-        if st.button("Run query", key="run_query"):
-            if not custom_sql.strip():
-                st.warning("Enter a SQL query first.")
-            else:
+
+        if db_mode == "Browse tables":
+            if st.button("List tables", key="list_tables"):
                 try:
-                    st.session_state.source_df = run_custom_query(
-                        env, custom_sql, row_limit
-                    )
-                    st.session_state.suggestions = None
-                    st.session_state.reviewed_ready = False
-                    st.success(
-                        f"Query returned **{len(st.session_state.source_df):,}** rows."
-                    )
+                    st.session_state.db_tables = list_tables(env)
                 except Exception as exc:
                     st.error(str(exc))
+
+            tables = st.session_state.get("db_tables", [])
+            if tables:
+                selected = st.selectbox("Select table", tables, key="db_table")
+                if st.button("Load table", key="load_table"):
+                    try:
+                        st.session_state.source_df = load_table(env, selected, row_limit)
+                        st.session_state.suggestions = None
+                        st.session_state.reviewed_ready = False
+                        st.success(
+                            f"Loaded **{len(st.session_state.source_df):,}** rows from `{selected}`."
+                        )
+                    except Exception as exc:
+                        st.error(str(exc))
+        else:
+            custom_sql = st.text_area(
+                "Custom SQL",
+                height=120,
+                placeholder="SELECT * FROM dbo.MyReport WHERE ...",
+                key="custom_sql",
+            )
+            st.caption(
+                f"A `TOP {row_limit}` safeguard is auto-injected if no row limit is present."
+            )
+            if st.button("Run query", key="run_query"):
+                if not custom_sql.strip():
+                    st.warning("Enter a SQL query first.")
+                else:
+                    try:
+                        st.session_state.source_df = run_custom_query(
+                            env, custom_sql, row_limit
+                        )
+                        st.session_state.suggestions = None
+                        st.session_state.reviewed_ready = False
+                        st.success(
+                            f"Query returned **{len(st.session_state.source_df):,}** rows."
+                        )
+                    except Exception as exc:
+                        st.error(str(exc))
 
 
 # --- Step 3: Source profile ---

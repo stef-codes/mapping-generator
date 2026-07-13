@@ -1,4 +1,8 @@
-"""Database connectivity via pyodbc (Windows trusted auth)."""
+"""Database connectivity via pyodbc (Windows trusted auth).
+
+pyodbc is optional — Streamlit Cloud / Linux hosts often segfault on import
+without Microsoft ODBC drivers. CSV upload works without this package.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,6 @@ import re
 from pathlib import Path
 
 import pandas as pd
-import pyodbc
 from dotenv import load_dotenv
 
 from src.config import DEFAULT_ROW_LIMIT, MAX_ROW_LIMIT
@@ -16,6 +19,29 @@ ENV_KEYS = {
     "DEV": "DB_DEV_CONNECTION_STRING",
     "QA": "DB_QA_CONNECTION_STRING",
 }
+
+_PYODBC_ERROR = (
+    "Live database requires `pyodbc` and an ODBC SQL Server driver "
+    "(typically Windows with Trusted Connection). "
+    "On Streamlit Cloud, use CSV upload instead."
+)
+
+
+def is_database_available() -> bool:
+    try:
+        import pyodbc  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _pyodbc():
+    try:
+        import pyodbc
+    except Exception as exc:
+        raise RuntimeError(_PYODBC_ERROR) from exc
+    return pyodbc
 
 
 def load_env() -> None:
@@ -38,6 +64,7 @@ def get_connection_string(environment: str) -> str:
 
 def test_connection(environment: str) -> tuple[bool, str]:
     try:
+        pyodbc = _pyodbc()
         conn_str = get_connection_string(environment)
         with pyodbc.connect(conn_str, timeout=10) as conn:
             cursor = conn.cursor()
@@ -49,6 +76,7 @@ def test_connection(environment: str) -> tuple[bool, str]:
 
 
 def list_tables(environment: str) -> list[str]:
+    pyodbc = _pyodbc()
     conn_str = get_connection_string(environment)
     query = """
         SELECT TABLE_SCHEMA, TABLE_NAME
@@ -68,6 +96,7 @@ def _clamp_limit(row_limit: int) -> int:
 def load_table(
     environment: str, table_name: str, row_limit: int = DEFAULT_ROW_LIMIT
 ) -> pd.DataFrame:
+    pyodbc = _pyodbc()
     limit = _clamp_limit(row_limit)
     if "." in table_name:
         schema, table = table_name.split(".", 1)
@@ -106,6 +135,7 @@ def inject_row_limit(sql: str, row_limit: int = DEFAULT_ROW_LIMIT) -> str:
 def run_custom_query(
     environment: str, sql: str, row_limit: int = DEFAULT_ROW_LIMIT
 ) -> pd.DataFrame:
+    pyodbc = _pyodbc()
     safe_sql = inject_row_limit(sql, row_limit)
     conn_str = get_connection_string(environment)
     with pyodbc.connect(conn_str, timeout=120) as conn:
