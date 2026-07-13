@@ -2,6 +2,8 @@
 
 Streamlit tool that reads a mapping specification and a source report, then produces a **draft** field-level mapping and Python transform script for human review.
 
+[![Demo video](https://img.youtube.com/vi/gKp7X6h45-c/maxresdefault.jpg)](https://youtu.be/gKp7X6h45-c)
+
 ## Setup
 
 ```powershell
