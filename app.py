@@ -12,11 +12,6 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# Streamlit re-runs app.py without reloading cached `src.*` modules.
-for _module_name in list(sys.modules):
-    if _module_name == "src" or _module_name.startswith("src."):
-        del sys.modules[_module_name]
-
 from src.config import AI_BATCH_SIZE, CATEGORIES, DEFAULT_ROW_LIMIT, GEMINI_MODEL, MAX_ROW_LIMIT, PREVIEW_ROW_LIMIT
 from src.ai_fallback import is_ai_available
 from src.database import (
@@ -243,7 +238,7 @@ if st.session_state.source_df is not None:
         st.caption(
             f"Profile stats sampled from 10,000 of **{row_count:,}** loaded rows."
         )
-    st.dataframe(st.session_state.source_profile, use_container_width=True, height=300)
+    st.dataframe(st.session_state.source_profile, width="stretch", height=300)
 
 
 # --- Step 4: Generate suggestions ---
@@ -309,7 +304,7 @@ if (
 
         edited = st.data_editor(
             sugg,
-            use_container_width=True,
+            width="stretch",
             num_rows="fixed",
             height=min(600, 35 * len(sugg) + 38),
             column_config={
@@ -359,7 +354,7 @@ if (
         )
         st.dataframe(
             transformed.head(PREVIEW_ROW_LIMIT),
-            use_container_width=True,
+            width="stretch",
             height=min(400, 35 * min(preview_rows, 25) + 38),
         )
         st.download_button(
@@ -378,7 +373,7 @@ if (
         validation = build_validation_report(edited)
         if not validation.empty:
             st.subheader("Validation flags")
-            st.dataframe(validation, use_container_width=True)
+            st.dataframe(validation, width="stretch")
 
         # --- Step 7: Export ---
         st.header("7. Export")

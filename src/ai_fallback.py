@@ -282,25 +282,27 @@ def _extract_mappings(text: str) -> list[dict]:
 
 
 def _call_gemini(prompt: str) -> str:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 
-    genai.configure(api_key=GEMINI_API_KEY)
+    client = genai.Client(api_key=GEMINI_API_KEY)
     models_to_try = [GEMINI_MODEL, "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
     seen: set[str] = set()
     errors: list[str] = []
+    config = types.GenerateContentConfig(
+        temperature=0.1,
+        response_mime_type="application/json",
+    )
 
     for model_name in models_to_try:
         if not model_name or model_name in seen:
             continue
         seen.add(model_name)
         try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.1,
-                    response_mime_type="application/json",
-                ),
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=config,
             )
             text = response.text or ""
             if text.strip():
