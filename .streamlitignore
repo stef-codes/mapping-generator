@@ -1,0 +1,10 @@
+# Reduce what Streamlit's file watcher would scan if enabled.
+.git
+.venv
+.devcontainer
+.pytest_cache
+__pycache__
+sample_data
+tests
+scripts
+*.pyc

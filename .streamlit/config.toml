@@ -4,6 +4,9 @@ base = "light"
 [server]
 headless = true
 enableXsrfProtection = true
+# Required on Streamlit Cloud — watchdog/inotify often hits watch limits
+# and then crashes with: Segmentation fault ... run-streamlit.sh
+fileWatcherType = "none"
 
 [browser]
 gatherUsageStats = false

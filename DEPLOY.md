@@ -61,6 +61,8 @@ Easiest path for a **CSV-only pilot** with colleagues.
 
 **Important:** Keep `requirements.txt` free of `pyodbc` and Gemini SDKs (`google-generativeai` / `google-genai`). Those native packages often cause **segmentation faults** on Streamlit Cloud. This app calls Gemini over HTTPS REST instead. Use CSV upload in the cloud; install `pyodbc` only on Windows for the Live database tab.
 
+**If you still see `Segmentation fault` in `run-streamlit.sh`:** that is often Streamlit’s file watcher hitting Linux **inotify** limits (not your Gemini key). This repo sets `fileWatcherType = "none"` in `.streamlit/config.toml`. After pushing, **Reboot** the app (or delete and recreate it so the old venv is gone). In Cloud settings, use **Python 3.11 or 3.12** (avoid 3.13).
+
 ---
 
 ## 2. Docker container
